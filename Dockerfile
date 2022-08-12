@@ -1,8 +1,22 @@
-FROM proxysql/proxysql:2.0.10
+FROM debian:11
 
-MAINTAINER Nikolaos Vyzas <nick@proxysql.com>
+# Sourced from
+# https://hub.docker.com/r/proxysql/proxysql
+MAINTAINER Rene Cannao <rene@proxysql.com>
 
-RUN apt update && apt -y install mysql-client && apt clean all
+RUN \
+  apt-get update && \
+  apt-get install -y \
+    wget \
+    lsb-release \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    mariadb-client && \
+  wget -O - 'https://repo.proxysql.com/ProxySQL/repo_pub_key' | apt-key add - && \
+  echo deb https://repo.proxysql.com/ProxySQL/proxysql-2.3.x/$(lsb_release -sc)/ ./ | tee /etc/apt/sources.list.d/proxysql.list && \
+  apt-get update && \
+  apt-get install proxysql && \
+  rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["proxysql", "-f", "-D", "/var/lib/proxysql"]
-
+ENTRYPOINT ["proxysql", "-f", "--idle-threads", "-D", "/var/lib/proxysql"]

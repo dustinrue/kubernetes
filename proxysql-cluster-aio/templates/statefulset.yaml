@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "proxysql-cluster-aio.fullname" . }}-controller
+  labels:
+{{ include "proxysql-cluster-aio.labels" . | indent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "proxysql-cluster-aio.fullname" . }}-controller
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "proxysql-cluster-aio.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps/controller.yaml") . | sha256sum }}
+      labels:
+        app.kubernetes.io/name: {{ include "proxysql-cluster-aio.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: controller
+              containerPort: 6032
+              protocol: TCP
+          volumeMounts:
+            - name: {{ .Release.Name }}-controller-config
+              mountPath: /usr/local/bin/probe-proxysql.bash
+              subPath: probe-proxysql.bash
+            - name: {{ .Release.Name }}-controller-config
+              mountPath: /etc/proxysql.cnf
+              subPath: proxysql.cnf
+            - name: proxysql-cluster-controller-persistent-storage
+              mountPath: /var/lib/proxysql
+            - name: {{ .Release.Name }}-controller-config
+              mountPath: /tmp/hg-scheduler.bash
+              subPath: hg-scheduler.bash
+          livenessProbe:
+            exec:
+              command: ["/bin/bash","/usr/local/bin/probe-proxysql.bash"]
+          readinessProbe:
+            exec:
+              command: ["/bin/bash","/usr/local/bin/probe-proxysql.bash"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+    {{- with .Values.nodeSelector }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      volumes:
+        - name: {{ .Release.Name }}-controller-config
+          configMap:
+            name: {{ .Release.Name }}-controller-config
+  volumeClaimTemplates:
+    - metadata:
+        name: proxysql-cluster-controller-persistent-storage
+      spec:
+        accessModes: 
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 500Mi

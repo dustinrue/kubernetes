@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "proxysql-cluster-aio.fullname" . }}
+  labels:
+    {{- include "proxysql-cluster-aio.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "proxysql-cluster-aio.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps/proxysql.yaml") . | sha256sum }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "proxysql-cluster-aio.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "proxysql-cluster-aio.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: proxysql
+              containerPort: 6033
+              protocol: TCP
+            - name: admin
+              containerPort: 6032
+              protocol: TCP
+          volumeMounts:
+            - name: {{ .Release.Name }}-proxysql-config
+              mountPath: /usr/local/bin/probe-proxysql.bash
+              subPath: probe-proxysql.bash
+            - name: {{ .Release.Name }}-proxysql-config
+              mountPath: /etc/proxysql.cnf
+              subPath: proxysql.cnf
+            - name: {{ .Release.Name }}-proxysql-config
+              mountPath: /tmp/hg-scheduler.bash
+              subPath: hg-scheduler.bash
+          livenessProbe:
+            exec:
+              command: ["/bin/bash","/usr/local/bin/probe-proxysql.bash"]
+          readinessProbe:
+            exec:
+              command: ["/bin/bash","/usr/local/bin/probe-proxysql.bash"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: {{ .Release.Name }}-proxysql-config
+          configMap:
+            name: {{ .Release.Name }}-proxysql-config

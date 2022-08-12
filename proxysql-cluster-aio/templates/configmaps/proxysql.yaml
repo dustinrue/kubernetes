@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-proxysql-config
+data: 
+  proxysql.cnf: |
+    datadir="/var/lib/proxysql"
+
+    admin_variables=
+    {
+      admin_credentials="admin:admin;radmin:radmin"
+      mysql_ifaces="0.0.0.0:6032"
+      cluster_username="radmin"
+      cluster_password="radmin"
+      cluster_check_interval_ms=200
+      cluster_check_status_frequency=100
+      cluster_mysql_query_rules_save_to_disk=true
+      cluster_mysql_servers_save_to_disk=true
+      cluster_mysql_users_save_to_disk=true
+      cluster_proxysql_servers_save_to_disk=true
+      cluster_mysql_query_rules_diffs_before_sync=3
+      cluster_mysql_servers_diffs_before_sync=3
+      cluster_mysql_users_diffs_before_sync=3
+      cluster_proxysql_servers_diffs_before_sync=3
+    }
+
+    mysql_variables=
+    {
+      threads=2
+      max_connections=2048
+      default_query_delay=0
+      default_query_timeout=36000000
+      have_compress=true
+      poll_timeout=2000
+      interfaces="0.0.0.0:6033"
+      default_schema="information_schema"
+      stacksize=1048576
+      server_version="8.0.20"
+      connect_timeout_server=3000
+      monitor_username="monitor"
+      monitor_password="monitor"
+      monitor_history=600000
+      monitor_connect_interval=5000
+      monitor_ping_interval=2000
+      monitor_read_only_interval=1500
+      monitor_read_only_timeout=500
+      ping_interval_server_msec=15000
+      ping_timeout_server=500
+      commands_stats=true
+      sessions_sort=true
+      connect_retries_on_failure=10
+    }
+
+    proxysql_servers =
+    (
+        {
+            hostname="{{ include "proxysql-cluster-aio.fullname" . }}-controller"
+            port=6032
+            weight=0
+            comment="{{ include "proxysql-cluster-aio.fullname" . }}-controller"
+        }
+    )
+
+
+
+
+  probe-proxysql.bash: |
+    #!/bin/bash
+    set -e
+
+    mbin="/usr/bin/mysql"
+    lcon="-h127.0.0.1 -P6032 -uadmin -padmin"
+    opts="-NB"
+
+    hg0_avail=$($mbin $lcon $opts -e"select count(*) from runtime_mysql_servers where hostgroup_id = 0")
+
+    if [[ $hg0_avail -eq 1 ]];
+    then
+      echo "HG0 Availability Success"
+      exit 0
+    else
+      echo "HG0 Availability Failure - MySQL backends found: $hg0_avail"
+      exit 1
+    fi
+  hg-scheduler.bash: |
+    #!/bin/bash
+    CUR_CS=$(/usr/bin/md5sum $0 | /usr/bin/awk '{print $1}')
+    PRE_CS=$(/bin/cat /tmp/cs.file | /usr/bin/awk '{print $1}')
+
+    if [[ $CUR_CS != $PRE_CS ]];
+    then
+      /bin/echo "Diffs detected, executing"
+      /usr/bin/mysql -uadmin -padmin -h127.0.0.1 -P6032 -e"
+
+        DELETE FROM proxysql_servers;
+        INSERT INTO proxysql_servers (hostname,port,weight,comment) 
+          VALUES ('{{ include "proxysql-cluster-aio.fullname" . }}-controller',6032,0,'{{ include "proxysql-cluster-aio.fullname" . }}-controller');
+        LOAD PROXYSQL SERVERS TO RUNTIME;
+        SAVE PROXYSQL SERVERS TO DISK;
+
+
+      "
+      /bin/echo $CUR_CS > /tmp/cs.file
+    fi
+
